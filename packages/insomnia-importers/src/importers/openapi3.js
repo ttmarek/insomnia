@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
-
+let i = 0;
 const SwaggerParser = require('swagger-parser');
 const { parse: urlParse } = require('url');
 const utils = require('../utils');
@@ -35,11 +35,11 @@ module.exports.convert = async function(rawData) {
     return null;
   }
 
-  try {
-    api = await SwaggerParser.validate(api);
-  } catch (err) {
-    console.log('[openapi3] Import file validation failed', err);
-  }
+  // try {
+  //   api = await SwaggerParser.validate(api);
+  // } catch (err) {
+  //   console.log('[openapi3] Import file validation failed', err);
+  // }
 
   // Import
   const workspace = {
@@ -56,7 +56,7 @@ module.exports.convert = async function(rawData) {
     parentId: WORKSPACE_ID,
     name: 'Base environment',
     data: {
-      base_url: '{{ scheme }}://{{ host }}{{ base_path }}',
+      base_url: 'https://api.stripe.com',
     },
   };
 
@@ -66,6 +66,7 @@ module.exports.convert = async function(rawData) {
     api.components && api.components.securitySchemes,
   );
 
+  console.log(defaultServer.protocol);
   const protocol = defaultServer.protocol || '';
   const openapiEnv = {
     _type: 'environment',
@@ -130,14 +131,29 @@ function parseEndpoints(document) {
     );
 
   const tags = document.tags || [];
-  const folders = tags.map(tag => {
-    return importFolderItem(tag, defaultParent);
+
+  const tags2 = new Set();
+
+  endpointsSchemas.forEach(s => {
+    tags2.add(s.path.split('/')[2]);
   });
+
+  // const folders = tags.map(tag => {
+  //   return importFolderItem(tag, defaultParent);
+  // });
+
+  const folders = [];
+  tags2.forEach(tag => {
+    folders.push(importFolderItem({ name: tag, description: tag }, defaultParent));
+  });
+
   const folderLookup = {};
 
   for (const folder of folders) {
     folderLookup[folder.name] = folder._id;
   }
+
+  //   console.log(folderLookup);
 
   const requests = [];
   endpointsSchemas.map(endpointSchema => {
@@ -148,7 +164,8 @@ function parseEndpoints(document) {
     }
 
     for (const tag of tags) {
-      const parentId = folderLookup[tag] || defaultParent;
+      // const parentId = folderLookup[tag] || defaultParent;
+      const parentId = folderLookup[endpointSchema.path.split('/')[2]];
       const resolvedSecurity = endpointSchema.security || rootSecurity;
       requests.push(importRequest(endpointSchema, parentId, resolvedSecurity, securitySchemes));
     }
@@ -180,6 +197,11 @@ function importFolderItem(item, parentId) {
   };
 }
 
+function discover(item) {
+  if (item.path.includes('/v1/payment_intents/{intent}') && item.method === 'get') {
+    console.log(item);
+  }
+}
 /**
  * Return Insomnia request
  *
@@ -191,28 +213,67 @@ function importFolderItem(item, parentId) {
  * @returns {Object}
  */
 function importRequest(endpointSchema, parentId, security, securitySchemes) {
-  const name = endpointSchema.summary || endpointSchema.path;
+  // const name = endpointSchema.summary || endpointSchema.path;
+  const name = endpointSchema.path.replace('/v1/', '');
+
   const id = generateUniqueRequestId(endpointSchema);
-  const paramHeaders = prepareHeaders(endpointSchema);
+  // const paramHeaders = prepareHeaders(endpointSchema);
   const { authentication, headers: securityHeaders, parameters: securityParams } = parseSecurity(
     security,
     securitySchemes,
   );
 
+  discover(endpointSchema);
   const request = {
     _type: 'request',
     _id: id,
     parentId: parentId,
     name,
     method: endpointSchema.method.toUpperCase(),
-    url: '{{ base_url }}' + pathWithParamsAsVariables(endpointSchema.path),
-    body: prepareBody(endpointSchema),
-    headers: [...paramHeaders, ...securityHeaders],
-    authentication,
+    // url: '{{ base_url }}' + pathWithParamsAsVariables(endpointSchema.path),
+    url: '{{ base_url }}' + endpointSchema.path,
+    body: prepareBody2(endpointSchema),
+    // headers: [...paramHeaders, ...securityHeaders],
+    headers: [
+      {
+        name: 'Content-Type',
+        value: 'application/x-www-form-urlencoded',
+      },
+    ],
+    // authentication,
+    description: `\`\`\`\n${JSON.stringify(endpointSchema, null, 2)}\n\`\`\``,
+    authentication: {
+      password: '',
+      type: 'basic',
+      username: '{{ secret_key }}',
+    },
+    // TODO
     parameters: [...prepareQueryParams(endpointSchema), ...securityParams],
   };
 
   return request;
+}
+
+function prepareBody2(endpointSchema) {
+  if (
+    endpointSchema.requestBody &&
+    endpointSchema.requestBody.content['application/x-www-form-urlencoded']
+  ) {
+    const params = Object.keys(
+      endpointSchema.requestBody.content['application/x-www-form-urlencoded'].schema.properties,
+    ).map(key => ({
+      description: '',
+      name: key,
+      value: '',
+      disabled: true,
+    }));
+
+    return {
+      mimeType: 'application/x-www-form-urlencoded',
+      params,
+    };
+  }
+  return {};
 }
 
 /**
@@ -239,6 +300,8 @@ function prepareQueryParams(endpointSchema) {
   const queryParameters = parameters.filter(isSendInQuery);
   return convertParameters(queryParameters);
 }
+
+function prepareQueryParams2(endpointSchema) {}
 
 /**
  * Imports insomnia definitions of header parameters.

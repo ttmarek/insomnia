@@ -8,6 +8,7 @@ const MIMETYPE_MULTIPART = 'multipart/form-data';
 const SUPPORTED_MIME_TYPES = [MIMETYPE_JSON, MIMETYPE_URLENCODED, MIMETYPE_MULTIPART];
 const WORKSPACE_ID = '__WORKSPACE_ID__';
 
+let count = 0;
 let requestCount = 1;
 let requestGroupCount = 1;
 
@@ -26,13 +27,13 @@ module.exports.convert = async function(rawData) {
   }
 
   // Await here so we catch any exceptions
-  try {
-    api = await SwaggerParser.validate(api);
-  } catch (err) {
-    // We already know it's a Swagger doc so we will try to import it anyway instead
-    // of bailing out here.
-    console.log('[swagger] Import file validation failed', err);
-  }
+  // try {
+  //   api = await SwaggerParser.validate(api);
+  // } catch (err) {
+  //   // We already know it's a Swagger doc so we will try to import it anyway instead
+  //   // of bailing out here.
+  //   console.log('[swagger] Import file validation failed', err);
+  // }
 
   // Import
   const workspace = {
@@ -49,7 +50,7 @@ module.exports.convert = async function(rawData) {
     parentId: WORKSPACE_ID,
     name: 'Base environment',
     data: {
-      base_url: '{{ scheme }}://{{ host }}{{ base_path }}',
+      base_url: 'https://api.stripe.com',
     },
   };
 
@@ -95,7 +96,7 @@ async function parseDocument(rawData) {
 function parseEndpoints(document) {
   const defaultParent = WORKSPACE_ID;
   const globalMimeTypes = document.consumes;
-
+  console.log(document.consumes);
   const paths = Object.keys(document.paths);
   const endpointsSchemas = paths
     .map(path => {
@@ -366,8 +367,11 @@ function resolve$ref(schema, $ref) {
  */
 function prepareBody(schema, endpointSchema, globalMimeTypes) {
   const mimeTypes = endpointSchema.consumes || globalMimeTypes || [];
+
   const isAvailable = m => mimeTypes.includes(m);
   const supportedMimeType = SUPPORTED_MIME_TYPES.find(isAvailable);
+  // const supportedMimeType = MIMETYPE_JSON;
+
   if (supportedMimeType === MIMETYPE_JSON) {
     const isSendInBody = p => p.in === 'body';
     const parameters = endpointSchema.parameters || [];
@@ -390,6 +394,8 @@ function prepareBody(schema, endpointSchema, globalMimeTypes) {
       text = JSON.stringify(example, null, 2);
     }
 
+    console.log(text);
+
     return {
       mimeType: supportedMimeType,
       text,
@@ -404,6 +410,7 @@ function prepareBody(schema, endpointSchema, globalMimeTypes) {
     if (formDataParameters.length === 0) {
       return {};
     }
+
     return {
       mimeType: supportedMimeType,
       params: convertParameters(formDataParameters),
